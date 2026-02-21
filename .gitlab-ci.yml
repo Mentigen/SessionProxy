@@ -1,0 +1,4 @@
+include:
+  - project: 'dbd26/ci-secure'
+    file: 'testing-job.yml'
+    ref: 'main'
