@@ -1,4 +1,4 @@
 include:
-  - project: 'dbd26/ci-secure'
+  - project: 'db-infra/lab-stage-ci'
     file: 'testing-job.yml'
     ref: 'main'
