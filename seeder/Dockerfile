@@ -1,8 +1,7 @@
 FROM postgres:16-alpine
 
-COPY seeds/       /seeds/
-COPY scripts/run_seeds.sh /scripts/run_seeds.sh
+COPY seeds/ /seeds/
 
-RUN chmod +x /scripts/run_seeds.sh
+RUN chmod +x /seeds/run_seeds.sh
 
-ENTRYPOINT ["/scripts/run_seeds.sh"]
+ENTRYPOINT ["/seeds/run_seeds.sh"]

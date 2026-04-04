@@ -1,13 +1,33 @@
 #!/bin/sh
 set -e
 
-echo "==> Creating test database '${TEST_POSTGRES_DB}'..."
+echo "==> Recreating test database '${TEST_POSTGRES_DB}'..."
 PGPASSWORD="${POSTGRES_PASSWORD}" psql \
     -h postgres \
     -U "${POSTGRES_USER}" \
     -d "${POSTGRES_DB}" \
-    -c "CREATE DATABASE \"${TEST_POSTGRES_DB}\";" 2>/dev/null \
-    || echo "    Test database already exists, skipping."
+    -c "DROP DATABASE IF EXISTS \"${TEST_POSTGRES_DB}\";" 2>/dev/null
+PGPASSWORD="${POSTGRES_PASSWORD}" psql \
+    -h postgres \
+    -U "${POSTGRES_USER}" \
+    -d "${POSTGRES_DB}" \
+    -c "CREATE DATABASE \"${TEST_POSTGRES_DB}\";"
+
+if [ -n "${POSTGRES_EXPORTER_USER}" ] && [ -n "${POSTGRES_EXPORTER_PASSWORD}" ]; then
+    echo "==> Creating exporter user '${POSTGRES_EXPORTER_USER}'..."
+    PGPASSWORD="${POSTGRES_PASSWORD}" psql \
+        -h postgres \
+        -U "${POSTGRES_USER}" \
+        -d "${POSTGRES_DB}" \
+        -c "CREATE USER ${POSTGRES_EXPORTER_USER} WITH PASSWORD '${POSTGRES_EXPORTER_PASSWORD}';" 2>/dev/null \
+        || echo "    Exporter user already exists, skipping."
+    PGPASSWORD="${POSTGRES_PASSWORD}" psql \
+        -h postgres \
+        -U "${POSTGRES_USER}" \
+        -d "${POSTGRES_DB}" \
+        -c "GRANT pg_monitor TO ${POSTGRES_EXPORTER_USER};" 2>/dev/null \
+        || echo "    pg_monitor grant already set, skipping."
+fi
 
 echo "==> Running Seqwall staircase tests..."
 seqwall staircase \

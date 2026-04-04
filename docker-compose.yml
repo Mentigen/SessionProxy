@@ -26,6 +26,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       TEST_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${TEST_POSTGRES_DB}?sslmode=disable
       MIGRATION_VERSION: ${MIGRATION_VERSION:-}
+      POSTGRES_EXPORTER_USER: ${POSTGRES_EXPORTER_USER:-exporter}
+      POSTGRES_EXPORTER_PASSWORD: ${POSTGRES_EXPORTER_PASSWORD:-exporter_secret}
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,3 +45,37 @@ services:
         condition: service_completed_successfully
     profiles:
       - seed
+
+  postgres_exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_EXPORTER_USER:-exporter}:${POSTGRES_EXPORTER_PASSWORD:-exporter_secret}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    profiles:
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - postgres_exporter
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:10.4.2
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    profiles:
+      - monitoring
