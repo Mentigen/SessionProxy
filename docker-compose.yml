@@ -121,3 +121,106 @@ services:
         condition: service_healthy
     profiles:
       - backup
+
+  etcd:
+    image: gcr.io/etcd-development/etcd:v3.5.17
+    command:
+      - etcd
+      - --name=etcd
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --initial-cluster=etcd=http://etcd:2380
+      - --initial-cluster-state=new
+      - --initial-cluster-token=sessionproxy-etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://localhost:2379", "endpoint", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    profiles:
+      - ha
+
+  patroni1:
+    build:
+      context: .
+      dockerfile: ha/Dockerfile
+    env_file: .env
+    environment:
+      PATRONI_NAME: patroni1
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      PATRONI_SUPERUSER_PASSWORD: ${PATRONI_SUPERUSER_PASSWORD}
+    volumes:
+      - ./data/patroni1:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8008/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    depends_on:
+      etcd:
+        condition: service_healthy
+    profiles:
+      - ha
+
+  patroni2:
+    build:
+      context: .
+      dockerfile: ha/Dockerfile
+    env_file: .env
+    environment:
+      PATRONI_NAME: patroni2
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      PATRONI_SUPERUSER_PASSWORD: ${PATRONI_SUPERUSER_PASSWORD}
+    volumes:
+      - ./data/patroni2:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8008/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    depends_on:
+      etcd:
+        condition: service_healthy
+      patroni1:
+        condition: service_healthy
+    profiles:
+      - ha
+
+  haproxy:
+    image: haproxy:2.8-alpine
+    volumes:
+      - ./ha/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "${HA_PORT:-5433}:5432"
+      - "${HA_STATS_PORT:-7000}:7000"
+    depends_on:
+      patroni1:
+        condition: service_healthy
+      patroni2:
+        condition: service_healthy
+    profiles:
+      - ha
+
+  migrate-ha:
+    build:
+      context: .
+      dockerfile: migrate/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@haproxy:5432/${POSTGRES_DB}?sslmode=disable
+      TEST_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@haproxy:5432/${TEST_POSTGRES_DB}?sslmode=disable
+      MIGRATION_VERSION: ${MIGRATION_VERSION:-}
+      POSTGRES_EXPORTER_USER: ${POSTGRES_EXPORTER_USER:-exporter}
+      POSTGRES_EXPORTER_PASSWORD: ${POSTGRES_EXPORTER_PASSWORD:-exporter_secret}
+      PG_HOST: haproxy
+    depends_on:
+      haproxy:
+        condition: service_started
+    restart: on-failure
+    profiles:
+      - ha
