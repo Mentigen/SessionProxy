@@ -1,0 +1,33 @@
+migration:
+  before_version: "5"
+  after_version: "7"
+
+setup:
+  command: >-
+    $DOCKER_COMPOSE up -d postgres
+    && $DOCKER_COMPOSE run --rm -T migrate
+    && $DOCKER_COMPOSE run --rm -T seeder
+    && ($DOCKER_COMPOSE exec -T postgres psql -U ${POSTGRES_USER:-sessionproxy} -d ${POSTGRES_DB:-sessionproxy} -c 'REFRESH MATERIALIZED VIEW mv_link_stats' 2>/dev/null || true)
+
+benchmark:
+  before_queries: queries_before.sql
+  after_queries:  queries_after.sql
+  repeats: 3
+  warmup_iterations: 5
+  iterations: 200
+  concurrency: 4
+
+report:
+  description:
+    - query: log_recent_requests_for_link
+      what: Выборка последних 100 записей из proxy_access_logs по shared_link_id
+      changes: Составной индекс idx_proxy_access_logs_link_time (shared_link_id, requested_at DESC)
+      expected: Index Scan вместо Seq Scan на самой быстрорастущей таблице
+    - query: olap_traffic_per_site_30d
+      what: Агрегация трафика по target_site за 30 дней через JOIN четырёх таблиц
+      changes: Материализованное представление mv_link_stats заменяет полный JOIN + GROUP BY
+      expected: Читаем заранее посчитанные строки из view вместо полного JOIN по proxy_access_logs
+    - query: oltp_active_links_for_session
+      what: Активные shared_links для заданного original_session_id
+      changes: Частичный индекс idx_shared_links_active_by_session (original_session_id) WHERE status='active'
+      expected: Index Scan по подмножеству активных ссылок вместо Seq Scan

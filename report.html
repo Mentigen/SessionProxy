@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>pgcompare \u2014 \u041e\u0442\u0447\u0451\u0442 \u043f\u043e \u043e\u043f\u0442\u0438\u043c\u0438\u0437\u0430\u0446\u0438\u0438 PostgreSQL</title>
+    <style>
+        :root {
+            --bg:           #f5f4f2;
+            --surface:      #ffffff;
+            --border:       #e5e7eb;
+            --text:         #111827;
+            --text-muted:   #6b7280;
+            --text-light:   #9ca3af;
+            --accent:       #1d4ed8;
+            --accent-bg:    #eff6ff;
+            --good-text:    #166534;
+            --good-bg:      #dcfce7;
+            --bad-text:     #991b1b;
+            --bad-bg:       #fee2e2;
+            --neutral-bg:   #f3f4f6;
+            --code-bg:      #1e1e2e;
+            --code-text:    #cdd6f4;
+            --nav-h:        48px;
+        }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.55; color: var(--text); background: var(--bg); }
+        .nav { position: sticky; top: 0; z-index: 100; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: stretch; overflow-x: auto; scrollbar-width: none; height: var(--nav-h); }
+        .nav::-webkit-scrollbar { display: none; }
+        .nav-brand { display: flex; align-items: center; padding: 0 20px 0 16px; font-weight: 700; font-size: 13px; color: var(--text); letter-spacing: -0.2px; white-space: nowrap; border-right: 1px solid var(--border); flex-shrink: 0; text-decoration: none; }
+        .nav-brand span { color: var(--accent); }
+        .nav-links { display: flex; align-items: stretch; overflow-x: auto; scrollbar-width: none; }
+        .nav-links::-webkit-scrollbar { display: none; }
+        .nav-link { display: flex; align-items: center; padding: 0 14px; white-space: nowrap; text-decoration: none; color: var(--text-muted); font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; flex-shrink: 0; }
+        .nav-link:hover { color: var(--text); }
+        .nav-link.active { color: var(--accent); border-bottom-color: var(--accent); }
+        .nav-link.is-query { font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 12px; }
+        .main { max-width: 880px; margin: 0 auto; padding: 40px 20px 80px; }
+        .header { margin-bottom: 44px; }
+        .header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.4px; margin-bottom: 6px; }
+        .header-meta { font-size: 13px; color: var(--text-muted); margin-bottom: 10px; }
+        .bench-params { display: flex; flex-wrap: wrap; gap: 6px; }
+        .bench-param { font-size: 12px; font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; background: var(--neutral-bg); border: 1px solid var(--border); color: var(--text-muted); padding: 2px 9px; border-radius: 4px; }
+        .section { margin-bottom: 48px; scroll-margin-top: calc(var(--nav-h) + 20px); }
+        .section-label { font-size: 18px; font-weight: 700; color: var(--text); border-left: 3px solid var(--accent); padding-left: 12px; margin-bottom: 18px; line-height: 1.2; }
+        .warning-banner { display: flex; gap: 14px; align-items: flex-start; background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #ef4444; border-radius: 8px; padding: 16px 18px; }
+        .warning-icon { font-size: 18px; flex-shrink: 0; line-height: 1.4; }
+        .warning-title { font-weight: 700; color: var(--bad-text); margin-bottom: 3px; }
+        .warning-body { font-size: 13px; color: #7f1d1d; line-height: 1.5; }
+        .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+        .card + .card { margin-top: 20px; }
+        .card-header { padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--neutral-bg); }
+        .card-query-name { font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 14px; font-weight: 600; color: var(--text); }
+        .card-section { padding: 20px; border-bottom: 1px solid var(--border); }
+        .card-section:last-child { border-bottom: none; }
+        .card-section-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--text-light); margin-bottom: 14px; }
+        .opt-entry { padding: 22px 0; border-bottom: 1px solid var(--border); }
+        .opt-entry:first-child { padding-top: 0; }
+        .opt-entry:last-child { border-bottom: none; padding-bottom: 0; }
+        .opt-query { display: inline-flex; align-items: center; font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-bg); border: 1px solid #bfdbfe; padding: 3px 10px; border-radius: 5px; margin-bottom: 16px; }
+        .opt-field { margin-bottom: 14px; }
+        .opt-field:last-child { margin-bottom: 0; }
+        .opt-field-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 5px; }
+        .opt-field-value { color: var(--text); line-height: 1.6; }
+        .opt-field-value pre { margin-top: 8px; background: #f6f8fa; color: #1f2328; border: 1px solid #d0d7de; padding: 14px 16px; border-radius: 6px; overflow-x: auto; font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.65; }
+        .opt-field-value code { font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 12px; color: var(--text); background: var(--neutral-bg); padding: 1px 5px; border-radius: 3px; }
+        .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+        .badge-good    { background: var(--good-bg);    color: var(--good-text); }
+        .badge-bad     { background: var(--bad-bg);     color: var(--bad-text); }
+        .badge-neutral { background: var(--neutral-bg); color: var(--text-muted); }
+        .badge-speedup { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; font-weight: 700; }
+        .summary-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .summary-table thead tr { background: var(--neutral-bg); border-bottom: 1px solid var(--border); }
+        .summary-table th { padding: 9px 14px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); white-space: nowrap; }
+        .summary-table td { padding: 11px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        .summary-table tbody tr:last-child td { border-bottom: none; }
+        .summary-table tbody tr:hover td { background: #fafaf9; }
+        .qname { font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 12px; font-weight: 600; }
+        .arrow { color: var(--text-light); padding: 0 5px; }
+        .stats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        .stats-table thead tr { background: var(--neutral-bg); border-bottom: 1px solid var(--border); }
+        .stats-table th { padding: 8px 14px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-muted); }
+        .stats-table td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+        .stats-table tbody tr:last-child td { border-bottom: none; }
+        .stats-table tbody tr:hover td { background: #fafaf9; }
+        .stats-table .metric-name { font-weight: 600; color: var(--text-muted); font-size: 12px; }
+        .stats-table .group-sep td { background: var(--neutral-bg); padding: 5px 14px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-light); border-bottom: 1px solid var(--border); }
+        details { margin-top: 2px; }
+        summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-muted); user-select: none; padding: 5px 0; list-style: none; }
+        summary::-webkit-details-marker { display: none; }
+        summary::before { content: '\25B6'; font-size: 9px; transition: transform 0.18s ease; display: inline-block; }
+        details[open] summary::before { transform: rotate(90deg); }
+        summary:hover { color: var(--text); }
+        .plan-trees { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+        @media (max-width: 640px) { .plan-trees { grid-template-columns: 1fr; } }
+        .plan-tree-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-light); margin-bottom: 8px; }
+        .plan-summary { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+        .plan-summary li { display: flex; align-items: baseline; gap: 8px; font-size: 13px; color: var(--text); }
+        .plan-summary li::before { content: '\2192'; color: var(--accent); font-weight: 700; flex-shrink: 0; }
+        .plan-box { background: var(--code-bg); border-radius: 6px; padding: 14px; overflow-x: auto; }
+        .plan-box pre { margin: 0; color: var(--code-text); font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 12px; line-height: 1.8; white-space: pre; }
+        .footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; font-size: 12px; color: var(--text-light); }
+        .footer a { color: var(--text-muted); text-decoration: none; display: inline-flex; align-items: center; gap: 5px; }
+        .footer a:hover { color: var(--text); }
+        .footer-gh svg { width: 14px; height: 14px; fill: currentColor; }
+        .metric-hint { display: inline-flex; align-items: center; }
+        .hint-icon { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: var(--neutral-bg); border: 1px solid var(--border); color: var(--text-muted); font-size: 9px; font-weight: 700; cursor: default; font-style: normal; flex-shrink: 0; margin-left: 4px; user-select: none; }
+        .hint-icon:hover { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+    </style>
+</head>
+<body>
+
+<nav class="nav" id="nav">
+    <a href="#" class="nav-brand">pg<span>compare</span></a>
+    <div class="nav-links" id="nav-links"></div>
+</nav>
+
+<div class="main" id="app"></div>
+
+<script>
+     
+    window.reportData = (function() {
+        var beforeStats = [];
+        beforeStats.push({QueryName:"oltp_active_link_by_token",Min: 62 ,Max: 12464 ,P50: 94 ,P95: 173 ,P99: 291 ,Mean: 222 ,StdDev: 1153 ,QPS: 11833.979212195436 ,ErrorRate: 0 });
+        beforeStats.push({QueryName:"oltp_active_links_for_session",Min: 67 ,Max: 11485 ,P50: 97 ,P95: 242 ,P99: 647 ,Mean: 224 ,StdDev: 1082 ,QPS: 12245.452253328529 ,ErrorRate: 0 });
+        beforeStats.push({QueryName:"log_recent_requests_for_link",Min: 75 ,Max: 10124 ,P50: 112 ,P95: 272 ,P99: 1258 ,Mean: 250 ,StdDev: 1002 ,QPS: 12354.514778285258 ,ErrorRate: 0 });
+        beforeStats.push({QueryName:"log_error_requests_recent",Min: 122 ,Max: 11415 ,P50: 170 ,P95: 390 ,P99: 937 ,Mean: 298 ,StdDev: 1111 ,QPS: 9926.274580805979 ,ErrorRate: 0 });
+        beforeStats.push({QueryName:"olap_traffic_per_site_30d",Min: 314 ,Max: 15718 ,P50: 418 ,P95: 689 ,P99: 1549 ,Mean: 588 ,StdDev: 1414 ,QPS: 5353.625716248201 ,ErrorRate: 0 });
+        beforeStats.push({QueryName:"olap_top_links_by_traffic_window",Min: 276 ,Max: 16216 ,P50: 387 ,P95: 716 ,P99: 1469 ,Mean: 564 ,StdDev: 1439 ,QPS: 4962.1438049123235 ,ErrorRate: 0 });
+        beforeStats.push({QueryName:"join_owner_session_link_traffic",Min: 241 ,Max: 14784 ,P50: 326 ,P95: 589 ,P99: 1184 ,Mean: 505 ,StdDev: 1374 ,QPS: 6615.563642714577 ,ErrorRate: 0 });
+        var afterStats = [];
+        afterStats.push({QueryName:"oltp_active_link_by_token",Min: 63 ,Max: 11748 ,P50: 105 ,P95: 294 ,P99: 1331 ,Mean: 233 ,StdDev: 1066 ,QPS: 12770.72255662714 ,ErrorRate: 0 });
+        afterStats.push({QueryName:"oltp_active_links_for_session",Min: 70 ,Max: 11404 ,P50: 107 ,P95: 286 ,P99: 866 ,Mean: 245 ,StdDev: 1089 ,QPS: 11753.345927827053 ,ErrorRate: 0 });
+        afterStats.push({QueryName:"log_recent_requests_for_link",Min: 77 ,Max: 10750 ,P50: 115 ,P95: 346 ,P99: 1342 ,Mean: 257 ,StdDev: 987 ,QPS: 11589.627515166476 ,ErrorRate: 0 });
+        afterStats.push({QueryName:"log_error_requests_recent",Min: 127 ,Max: 10742 ,P50: 183 ,P95: 321 ,P99: 1621 ,Mean: 311 ,StdDev: 1007 ,QPS: 9717.356593316334 ,ErrorRate: 0 });
+        afterStats.push({QueryName:"olap_traffic_per_site_30d",Min: 111 ,Max: 12851 ,P50: 170 ,P95: 390 ,P99: 1381 ,Mean: 351 ,StdDev: 1145 ,QPS: 8417.361042836961 ,ErrorRate: 0 });
+        afterStats.push({QueryName:"olap_top_links_by_traffic_window",Min: 294 ,Max: 14613 ,P50: 409 ,P95: 721 ,P99: 1219 ,Mean: 589 ,StdDev: 1407 ,QPS: 5409.449187975411 ,ErrorRate: 0 });
+        afterStats.push({QueryName:"join_owner_session_link_traffic",Min: 241 ,Max: 15547 ,P50: 316 ,P95: 529 ,P99: 1661 ,Mean: 504 ,StdDev: 1457 ,QPS: 6554.311135836885 ,ErrorRate: 0 });
+        var diffs = [];
+        diffs.push({QueryName:"oltp_active_link_by_token",Summary:["No significant plan changes detected",],BeforeText:"-\u003e Seq Scan on shared_links (rows=0 time=7µs)\n",AfterText:"-\u003e Seq Scan on shared_links (rows=0 time=7µs)\n"});
+        diffs.push({QueryName:"oltp_active_links_for_session",Summary:["No significant plan changes detected",],BeforeText:"-\u003e Sort (rows=0 time=26µs)\n  -\u003e Seq Scan on shared_links (rows=0 time=6µs)\n",AfterText:"-\u003e Sort (rows=0 time=11µs)\n  -\u003e Seq Scan on shared_links (rows=0 time=6µs)\n"});
+        diffs.push({QueryName:"log_recent_requests_for_link",Summary:["No significant plan changes detected",],BeforeText:"-\u003e Limit (rows=0 time=21µs)\n  -\u003e Sort (rows=0 time=20µs)\n    -\u003e Seq Scan on proxy_access_logs (rows=0 time=18µs)\n",AfterText:"-\u003e Limit (rows=0 time=26µs)\n  -\u003e Sort (rows=0 time=25µs)\n    -\u003e Seq Scan on proxy_access_logs (rows=0 time=23µs)\n"});
+        diffs.push({QueryName:"log_error_requests_recent",Summary:["No significant plan changes detected",],BeforeText:"-\u003e Limit (rows=18 time=44µs)\n  -\u003e Sort (rows=18 time=42µs)\n    -\u003e Seq Scan on proxy_access_logs (rows=18 time=31µs)\n",AfterText:"-\u003e Limit (rows=18 time=125µs)\n  -\u003e Sort (rows=18 time=119µs)\n    -\u003e Seq Scan on proxy_access_logs (rows=18 time=93µs)\n"});
+        diffs.push({QueryName:"olap_traffic_per_site_30d",Summary:["Hash Join -\u003e Seq Scan on mv_link_stats","Actual rows changed: 180 -\u003e 30","Removed 2 child node(s)",],BeforeText:"-\u003e Sort (rows=3 time=270µs)\n  -\u003e Aggregate (rows=3 time=260µs)\n    -\u003e Hash Join (rows=180 time=212µs)\n      -\u003e Hash Join (rows=180 time=161µs)\n        -\u003e Hash Join (rows=180 time=101µs)\n          -\u003e Seq Scan on proxy_access_logs (rows=180 time=46µs)\n          -\u003e Hash (rows=30 time=14µs)\n            -\u003e Seq Scan on shared_links (rows=30 time=4µs)\n        -\u003e Hash (rows=60 time=24µs)\n          -\u003e Seq Scan on original_sessions (rows=60 time=7µs)\n      -\u003e Hash (rows=5 time=13µs)\n        -\u003e Seq Scan on target_sites (rows=5 time=5µs)\n",AfterText:"-\u003e Sort (rows=3 time=130µs)\n  -\u003e Aggregate (rows=3 time=105µs)\n    -\u003e Seq Scan on mv_link_stats (rows=30 time=36µs)\n"});
+        diffs.push({QueryName:"olap_top_links_by_traffic_window",Summary:["No significant plan changes detected",],BeforeText:"-\u003e Sort (rows=30 time=203µs)\n  -\u003e WindowAgg (rows=30 time=172µs)\n    -\u003e Sort (rows=30 time=122µs)\n      -\u003e Hash Join (rows=30 time=98µs)\n        -\u003e Hash Join (rows=30 time=71µs)\n          -\u003e Hash Join (rows=30 time=35µs)\n            -\u003e Seq Scan on usage_counters (rows=30 time=3µs)\n            -\u003e Hash (rows=30 time=16µs)\n              -\u003e Seq Scan on shared_links (rows=30 time=4µs)\n          -\u003e Hash (rows=60 time=23µs)\n            -\u003e Seq Scan on original_sessions (rows=60 time=6µs)\n        -\u003e Hash (rows=5 time=12µs)\n          -\u003e Seq Scan on target_sites (rows=5 time=5µs)\n",AfterText:"-\u003e Sort (rows=30 time=463µs)\n  -\u003e WindowAgg (rows=30 time=386µs)\n    -\u003e Sort (rows=30 time=323µs)\n      -\u003e Hash Join (rows=30 time=268µs)\n        -\u003e Hash Join (rows=30 time=179µs)\n          -\u003e Hash Join (rows=30 time=90µs)\n            -\u003e Seq Scan on usage_counters (rows=30 time=10µs)\n            -\u003e Hash (rows=30 time=35µs)\n              -\u003e Seq Scan on shared_links (rows=30 time=13µs)\n          -\u003e Hash (rows=60 time=57µs)\n            -\u003e Seq Scan on original_sessions (rows=60 time=19µs)\n        -\u003e Hash (rows=5 time=51µs)\n          -\u003e Seq Scan on target_sites (rows=5 time=23µs)\n"});
+        diffs.push({QueryName:"join_owner_session_link_traffic",Summary:["No significant plan changes detected",],BeforeText:"-\u003e Limit (rows=16 time=205µs)\n  -\u003e Sort (rows=16 time=202µs)\n    -\u003e Aggregate (rows=16 time=188µs)\n      -\u003e Sort (rows=24 time=163µs)\n        -\u003e Hash Join (rows=24 time=147µs)\n          -\u003e Hash Join (rows=24 time=103µs)\n            -\u003e Hash Join (rows=24 time=58µs)\n              -\u003e Seq Scan on original_sessions (rows=60 time=5µs)\n              -\u003e Hash (rows=24 time=28µs)\n                -\u003e Seq Scan on shared_links (rows=24 time=14µs)\n            -\u003e Hash (rows=50 time=25µs)\n              -\u003e Seq Scan on users (rows=50 time=7µs)\n          -\u003e Hash (rows=30 time=27µs)\n            -\u003e Seq Scan on usage_counters (rows=30 time=8µs)\n",AfterText:"-\u003e Limit (rows=16 time=408µs)\n  -\u003e Sort (rows=16 time=402µs)\n    -\u003e Aggregate (rows=16 time=371µs)\n      -\u003e Sort (rows=24 time=309µs)\n        -\u003e Hash Join (rows=24 time=274µs)\n          -\u003e Hash Join (rows=24 time=182µs)\n            -\u003e Hash Join (rows=24 time=104µs)\n              -\u003e Seq Scan on original_sessions (rows=60 time=12µs)\n              -\u003e Hash (rows=24 time=48µs)\n                -\u003e Seq Scan on shared_links (rows=24 time=28µs)\n            -\u003e Hash (rows=50 time=45µs)\n              -\u003e Seq Scan on users (rows=50 time=13µs)\n          -\u003e Hash (rows=30 time=52µs)\n            -\u003e Seq Scan on usage_counters (rows=30 time=20µs)\n"});
+        var speedups = [ 0.588692589089257 , 0.8471425926120026 , 0.7856439773347227 , 1.2146032576210402 , 1.7665788745529263 , 0.9932405539029076 , 1.113194650312216 ,];
+        var description = [];
+        description.push({Query:"log_recent_requests_for_link",What:"Выборка последних 100 записей из proxy_access_logs по shared_link_id",Changes:"\"Составной индекс idx_proxy_access_logs_link_time (shared_link_id, requested_at DESC)\"",Expected:"Index Scan вместо Seq Scan на самой быстрорастущей таблице"});
+        description.push({Query:"olap_traffic_per_site_30d",What:"Агрегация трафика по target_site за 30 дней через JOIN четырёх таблиц",Changes:"\"Материализованное представление mv_link_stats заменяет полный JOIN + GROUP BY\"",Expected:"Чтение precomputed строк вместо сканирования всей proxy_access_logs"});
+        description.push({Query:"oltp_active_links_for_session",What:"Активные shared_links для заданного original_session_id",Changes:"\"Частичный индекс idx_shared_links_active_by_session (original_session_id) WHERE status='active'\"",Expected:"Index Scan по подмножеству активных ссылок вместо Seq Scan"});
+        return {
+            GeneratedAt: "04.05.2026, 16:15:51",
+            Iterations:  200 ,
+            WarmupIterations:  5 ,
+            Concurrency:  4 ,
+            Repeats:  3 ,
+            Speedups: speedups,
+            Description: description,
+            Before: {Phase: "before", Stats: beforeStats},
+            After:  {Phase: "after",  Stats: afterStats},
+            Diffs:  diffs
+        };
+    })();
+
+    var slugify = function(s) { return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); };
+    var fmtMs   = function(us) { return (us / 1000).toFixed(1) + '\u00a0ms'; };
+    var fmtQPS  = function(q)  { return q.toFixed(1); };
+    var fmtErr  = function(e)  { return (e * 100).toFixed(2) + '%'; };
+    var esc     = function(s)  { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); };
+
+    function calcDelta(before, after, higherIsBetter) {
+        if (before === 0) return { text: '\u2014', cls: 'badge-neutral' };
+        var pct = (after - before) / before * 100;
+        if (Math.abs(pct) < 0.5) return { text: '0.0%', cls: 'badge-neutral' };
+        var good = higherIsBetter ? pct > 0 : pct < 0;
+        return { text: (pct > 0 ? '+' : '') + pct.toFixed(1) + '%', cls: good ? 'badge-good' : 'badge-bad' };
+    }
+
+    function fmtSpeedup(f) {
+        if (!f) return { text: '1.0\u00d7', cls: 'badge-neutral' };
+        if (f >= 1.05) return { text: f.toFixed(1) + '\u00d7', cls: 'badge-speedup' };
+        if (f <= 0.95) return { text: f.toFixed(1) + '\u00d7', cls: 'badge-bad' };
+        return { text: '1.0\u00d7', cls: 'badge-neutral' };
+    }
+
+    function badge(d) { return '<span class="badge ' + d.cls + '">' + esc(d.text) + '</span>'; }
+
+    var METRIC_HINTS = {
+        'P50':       'Медиана. Половина запросов выполнилась быстрее этого значения. Отражает типичное время запроса.',
+        'P95':       '95% запросов выполнились быстрее этого значения. Основная метрика оценки оптимизации.',
+        'P99':       '99% запросов выполнились быстрее этого значения. Показывает худшие случаи, которые видят пользователей.',
+        'Min':       'Минимальное время выполнения за весь бенчмарк. Обычно соответствует идеальным условиям: все данные в кэше.',
+        'Max':       'Максимальное время выполнения. Может быть выбросом из-за блокировки или холодного кэша.',
+        'Mean':      'Среднее арифметическое время выполнения по всем итерациям. Менее надёжно, чем P95: один медленный запрос сдвигает его вверх.',
+        'StdDev':    'Стандартное отклонение от среднего. Низкое значение: запросы стабильны. Высокое: время выполнения непредсказуемо.',
+        'Speedup':   'Отношение P95 до к P95 после. Значение выше 1.0 означает ускорение, ниже 1.0 означает замедление.',
+        'QPS':       'Успешных запросов в секунду при заданной конкуренции. Показывает пропускную способность.',
+        'ErrorRate': 'Доля упавших запросов во время бенчмарка. В норме должна быть 0%.'
+    };
+
+    var BENCH_PARAM_HINTS = {
+        'iterations': 'Количество измеряемых выполнений каждого запроса в фазах before/after.',
+        'warmup iterations': 'Количество предварительных прогонов перед замером каждого запроса.',
+        'concurrency': 'Количество конкурентных воркеров, выполняющих запросы во время измерений.',
+        'repeats': 'Количество независимых повторов бенчмарка на фазу. Метрики агрегируются по медиане, что гасит случайные выбросы между прогонами.'
+    };
+
+    function hintIconFromText(text) {
+        if (!text) return '';
+        return '<i class="hint-icon" data-tip="' + esc(text) + '">i</i>';
+    }
+
+    function hintIcon(name) {
+        return hintIconFromText(METRIC_HINTS[name]);
+    }
+
+    function buildBenchParam(name, value) {
+        return '<span class="bench-param">' + esc(name) + ': ' + value + hintIconFromText(BENCH_PARAM_HINTS[name]) + '</span>';
+    }
+
+    function buildNavLinks(data) {
+        var links = [
+            { href: '#description', label: '\u041e\u043f\u0438\u0441\u0430\u043d\u0438\u0435' },
+            { href: '#summary',     label: '\u0421\u0432\u043e\u0434\u043a\u0430' }
+        ].concat(data.Before.Stats.map(function(s) {
+            return { href: '#query-' + slugify(s.QueryName), label: s.QueryName, cls: 'is-query' };
+        }));
+        return links.map(function(l) {
+            return '<a href="' + l.href + '" class="nav-link ' + (l.cls || '') + '" data-href="' + l.href + '">' + esc(l.label) + '</a>';
+        }).join('');
+    }
+
+    function buildHeader(data) {
+        var params = '';
+        if (data.Iterations) {
+            params = '<div class="bench-params">'
+                + buildBenchParam('iterations', data.Iterations)
+                + buildBenchParam('warmup iterations', data.WarmupIterations)
+                + buildBenchParam('concurrency', data.Concurrency)
+                + (data.Repeats && data.Repeats > 1 ? buildBenchParam('repeats', data.Repeats) : '')
+                + '</div>';
+        }
+        return '<div class="header">'
+            + '<h1>\u041e\u0442\u0447\u0451\u0442 \u043f\u043e \u043e\u043f\u0442\u0438\u043c\u0438\u0437\u0430\u0446\u0438\u0438 PostgreSQL</h1>'
+            + '<div class="header-meta">Generated at ' + esc(data.GeneratedAt) + '</div>'
+            + params
+            + '</div>';
+    }
+
+    function buildDescription(data) {
+        var entries = data.Description || [];
+        var inner;
+        if (entries.length === 0) {
+            inner = '<div class="warning-banner"><div class="warning-icon">\u26a0</div><div>'
+                + '<div class="warning-title">\u041e\u043f\u0438\u0441\u0430\u043d\u0438\u0435 \u043e\u043f\u0442\u0438\u043c\u0438\u0437\u0430\u0446\u0438\u0438 \u043d\u0435 \u0437\u0430\u043f\u043e\u043b\u043d\u0435\u043d\u043e</div>'
+                + '<div class="warning-body">\u0417\u0430\u043f\u043e\u043b\u043d\u0438\u0442\u0435 report.description \u0432 pgcompare.yaml \u043f\u0435\u0440\u0435\u0434 \u0441\u0434\u0430\u0447\u0435\u0439 \u0440\u0430\u0431\u043e\u0442\u044b.</div>'
+                + '</div></div>';
+        } else {
+            inner = entries.map(function(e) {
+                var h = '<div class="opt-entry">';
+                if (e.Query)    h += '<div class="opt-query">' + esc(e.Query) + '</div>';
+                if (e.What)     h += '<div class="opt-field"><div class="opt-field-label">\u0427\u0442\u043e \u0438\u0437\u043c\u0435\u043d\u0435\u043d\u043e</div><div class="opt-field-value">' + esc(e.What) + '</div></div>';
+                if (e.Changes)  h += '<div class="opt-field"><div class="opt-field-label">\u0418\u0437\u043c\u0435\u043d\u0435\u043d\u0438\u044f</div><div class="opt-field-value"><pre><code>' + esc(e.Changes) + '</code></pre></div></div>';
+                if (e.Expected) h += '<div class="opt-field"><div class="opt-field-label">\u041e\u0436\u0438\u0434\u0430\u0435\u043c\u044b\u0439 \u0440\u0435\u0437\u0443\u043b\u044c\u0442\u0430\u0442</div><div class="opt-field-value">' + esc(e.Expected) + '</div></div>';
+                h += '</div>';
+                return h;
+            }).join('');
+        }
+        return '<section class="section" id="description" data-section>'
+            + '<div class="section-label">\u041e\u043f\u0438\u0441\u0430\u043d\u0438\u0435 \u043e\u043f\u0442\u0438\u043c\u0438\u0437\u0430\u0446\u0438\u0438</div>'
+            + '<div class="card"><div class="card-section">' + inner + '</div></div>'
+            + '</section>';
+    }
+
+    function buildSummary(data) {
+        var rows = data.Before.Stats.map(function(b, i) {
+            var a    = data.After.Stats[i];
+            var p95d = calcDelta(b.P95, a.P95, false);
+            var spd  = fmtSpeedup(data.Speedups[i]);
+            var qpsd = calcDelta(b.QPS, a.QPS, true);
+            return '<tr>'
+                + '<td><span class="qname">' + esc(b.QueryName) + '</span></td>'
+                + '<td>' + fmtMs(b.P95) + '<span class="arrow">\u2192</span>' + fmtMs(a.P95) + '</td>'
+                + '<td>' + badge(p95d) + '</td>'
+                + '<td>' + badge(spd)  + '</td>'
+                + '<td>' + fmtQPS(b.QPS) + '<span class="arrow">\u2192</span>' + fmtQPS(a.QPS) + '</td>'
+                + '<td>' + badge(qpsd) + '</td>'
+                + '</tr>';
+        }).join('');
+        return '<section class="section" id="summary" data-section>'
+            + '<div class="section-label">\u0421\u0432\u043e\u0434\u043a\u0430</div>'
+            + '<div class="card"><table class="summary-table">'
+            + '<thead><tr>'
+            + '<th>\u0417\u0430\u043f\u0440\u043e\u0441</th>'
+            + '<th>p95: \u0434\u043e \u2192 \u043f\u043e\u0441\u043b\u0435</th>'
+            + '<th>p95 \u0394%</th>'
+            + '<th>Speedup</th>'
+            + '<th>QPS: \u0434\u043e \u2192 \u043f\u043e\u0441\u043b\u0435</th>'
+            + '<th>QPS \u0394%</th>'
+            + '</tr></thead>'
+            + '<tbody>' + rows + '</tbody>'
+            + '</table></div></section>';
+    }
+
+    function buildStatsRow(name, bVal, aVal, fmt, higher) {
+        var d = calcDelta(bVal, aVal, higher);
+        return '<tr>'
+            + '<td class="metric-name"><span class="metric-hint">' + name + hintIcon(name) + '</span></td>'
+            + '<td style="color:var(--text-muted)">' + fmt(bVal) + '</td>'
+            + '<td>' + fmt(aVal) + '</td>'
+            + '<td>' + badge(d) + '</td></tr>';
+    }
+
+    function buildStatsTable(b, a, speedup) {
+        speedup = fmtSpeedup(speedup);
+        var stddevRow = (b.StdDev || a.StdDev)
+            ? buildStatsRow('StdDev', b.StdDev, a.StdDev, fmtMs, false)
+            : '';
+        return '<table class="stats-table">'
+            + '<thead><tr><th>\u041c\u0435\u0442\u0440\u0438\u043a\u0430</th><th>\u0414\u043e</th><th>\u041f\u043e\u0441\u043b\u0435</th><th>\u0394%</th></tr></thead>'
+            + '<tbody>'
+            + '<tr class="group-sep"><td colspan="4">Latency</td></tr>'
+            + buildStatsRow('P50',  b.P50,  a.P50,  fmtMs, false)
+            + buildStatsRow('P95',  b.P95,  a.P95,  fmtMs, false)
+            + buildStatsRow('P99',  b.P99,  a.P99,  fmtMs, false)
+            + buildStatsRow('Min',  b.Min,  a.Min,  fmtMs, false)
+            + buildStatsRow('Max',  b.Max,  a.Max,  fmtMs, false)
+            + buildStatsRow('Mean', b.Mean, a.Mean, fmtMs, false)
+            + stddevRow
+            + '<tr><td class="metric-name"><span class="metric-hint">Speedup' + hintIcon('Speedup') + '</span></td><td style="color:var(--text-muted)">\u2014</td><td>\u2014</td><td>' + badge(speedup) + '</td></tr>'
+            + '<tr class="group-sep"><td colspan="4">Throughput &amp; Reliability</td></tr>'
+            + buildStatsRow('QPS',       b.QPS,       a.QPS,       fmtQPS, true)
+            + buildStatsRow('ErrorRate', b.ErrorRate, a.ErrorRate, fmtErr, false)
+            + '</tbody></table>';
+    }
+
+    function renderPlanTrees(diff) {
+        if (!diff) return '';
+        var before = diff.BeforeText ? '<div><div class="plan-tree-label">Before</div><div class="plan-box"><pre>' + esc(diff.BeforeText) + '</pre></div></div>' : '';
+        var after  = diff.AfterText  ? '<div><div class="plan-tree-label">After</div><div class="plan-box"><pre>'  + esc(diff.AfterText)  + '</pre></div></div>' : '';
+        if (!before && !after) return '';
+        return before + after;
+    }
+
+    function buildPlanDiff(diff, diffIndex) {
+        if (!diff) return '';
+        var summaryHtml = '';
+        if (diff.Summary && diff.Summary.length) {
+            summaryHtml = '<ul class="plan-summary">'
+                + diff.Summary.map(function(s) { return '<li>' + esc(s) + '</li>'; }).join('')
+                + '</ul>';
+        }
+        var planTrees = '';
+        if (diffIndex >= 0 && (diff.BeforeText || diff.AfterText)) {
+            planTrees = '<details><summary>\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c \u043f\u043b\u0430\u043d\u044b \u0437\u0430\u043f\u0440\u043e\u0441\u043e\u0432</summary>'
+                + '<div class="plan-trees" data-plan-container data-diff-index="' + diffIndex + '"></div></details>';
+        }
+        if (!summaryHtml && !planTrees) return '';
+        return '<div class="card-section-label">Query Plan</div>' + summaryHtml + planTrees;
+    }
+
+    function buildQueryCard(b, a, diff, speedup, diffIndex) {
+        var anchor = 'query-' + slugify(b.QueryName);
+        return '<div class="card section" id="' + anchor + '" data-section>'
+            + '<div class="card-header"><span class="card-query-name">' + esc(b.QueryName) + '</span></div>'
+            + '<div class="card-section"><div class="card-section-label">\u0421\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0430</div>' + buildStatsTable(b, a, speedup) + '</div>'
+            + '<div class="card-section">' + buildPlanDiff(diff, diffIndex) + '</div>'
+            + '</div>';
+    }
+
+    function buildFooter(data) {
+        var gh = '<svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>';
+        return '<footer class="footer">'
+            + '<span>Generated by pgcompare \u00b7 ' + esc(data.GeneratedAt) + '</span>'
+            + '<a href="https://github.com/pg-tools/pgcompare" class="footer-gh" target="_blank" rel="noopener">' + gh + 'pg-tools/pgcompare</a>'
+            + '</footer>';
+    }
+
+    function setupScrollSpy() {
+        var links    = document.querySelectorAll('.nav-link[data-href]');
+        var sections = document.querySelectorAll('[data-section]');
+        var obs = new IntersectionObserver(function(entries) {
+            entries.forEach(function(e) {
+                if (e.isIntersecting) {
+                    var id = '#' + e.target.id;
+                    links.forEach(function(l) { l.classList.toggle('active', l.dataset.href === id); });
+                }
+            });
+        }, { rootMargin: '-10% 0px -80% 0px' });
+        sections.forEach(function(s) { obs.observe(s); });
+    }
+
+    function initLazyPlans(data) {
+        document.addEventListener('toggle', function(e) {
+            var details = e.target;
+            if (!details || details.tagName !== 'DETAILS' || !details.open) return;
+
+            var container = details.querySelector('[data-plan-container]');
+            if (!container || container.dataset.loaded === '1') return;
+
+            var diffIndex = parseInt(container.dataset.diffIndex, 10);
+            if (isNaN(diffIndex) || diffIndex < 0 || diffIndex >= (data.Diffs || []).length) return;
+
+            var diff = data.Diffs[diffIndex];
+            container.innerHTML = renderPlanTrees(diff);
+            container.dataset.loaded = '1';
+        }, true);
+    }
+
+    (function() {
+        var data = window.reportData;
+
+        document.getElementById('nav-links').innerHTML = buildNavLinks(data);
+
+        var diffs = data.Diffs || [];
+        var cards = data.Before.Stats.map(function(b, i) {
+            var a       = data.After.Stats[i];
+            var diffIndex = -1;
+            for (var d = 0; d < diffs.length; d++) {
+                if (diffs[d].QueryName === b.QueryName) {
+                    diffIndex = d;
+                    break;
+                }
+            }
+            var diff    = diffIndex >= 0 ? diffs[diffIndex] : null;
+            var speedup = (data.Speedups || [])[i] || 0;
+            return buildQueryCard(b, a, diff, speedup, diffIndex);
+        }).join('');
+
+        document.getElementById('app').innerHTML =
+            buildHeader(data) + buildDescription(data) + buildSummary(data) + cards + buildFooter(data);
+
+        setupScrollSpy();
+        initLazyPlans(data);
+        initTooltips();
+    })();
+
+    function initTooltips() {
+        var margin = 8;
+        var tip = document.createElement('div');
+        tip.style.cssText = 'position:fixed;z-index:9999;background:#1f2937;color:#f9fafb;font-size:12px;line-height:1.55;padding:8px 12px;border-radius:6px;max-width:240px;overflow-wrap:anywhere;word-break:break-word;pointer-events:none;opacity:0;visibility:hidden;transition:opacity 0.12s;box-shadow:0 4px 12px rgba(0,0,0,0.25);';
+        document.body.appendChild(tip);
+
+        function findHintIcon(target) {
+            var el = target;
+            while (el && !el.classList.contains('hint-icon')) el = el.parentElement;
+            return el || null;
+        }
+
+        function hideTooltip() {
+            tip.style.opacity = '0';
+            tip.style.visibility = 'hidden';
+        }
+
+        function showTooltip(el, text) {
+            tip.textContent = text;
+            tip.style.left = '0px';
+            tip.style.top = '0px';
+            tip.style.opacity = '0';
+            tip.style.visibility = 'hidden';
+
+            var maxWidth = Math.min(320, window.innerWidth - margin * 2);
+            if (maxWidth < 120) maxWidth = Math.max(80, window.innerWidth - margin * 2);
+            tip.style.maxWidth = maxWidth + 'px';
+
+            var r = el.getBoundingClientRect();
+            var width = tip.offsetWidth;
+            var height = tip.offsetHeight;
+
+            var left = r.left + r.width / 2 - width / 2;
+            if (left < margin) left = margin;
+            if (left + width > window.innerWidth - margin) left = window.innerWidth - width - margin;
+
+            var top = r.top - height - margin;
+            if (top < margin) top = r.bottom + margin;
+            if (top + height > window.innerHeight - margin) top = Math.max(margin, window.innerHeight - height - margin);
+
+            tip.style.left = Math.round(left) + 'px';
+            tip.style.top = Math.round(top) + 'px';
+            tip.style.visibility = 'visible';
+            tip.style.opacity = '1';
+        }
+
+        document.addEventListener('mouseover', function(e) {
+            var el = findHintIcon(e.target);
+            if (!el) return;
+            var text = el.getAttribute('data-tip');
+            if (!text) return;
+            showTooltip(el, text);
+        });
+
+        document.addEventListener('mouseout', function(e) {
+            var el = findHintIcon(e.target);
+            if (!el) return;
+            hideTooltip();
+        });
+
+        window.addEventListener('scroll', hideTooltip, { passive: true, capture: true });
+        window.addEventListener('resize', hideTooltip, { passive: true });
+    }
+</script>
+</body>
+</html>
