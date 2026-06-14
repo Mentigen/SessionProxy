@@ -1,0 +1,5 @@
+<clickhouse>
+    <max_connections>100</max_connections>
+    <max_concurrent_queries>50</max_concurrent_queries>
+    <max_server_memory_usage_to_ram_ratio>0.5</max_server_memory_usage_to_ram_ratio>
+</clickhouse>

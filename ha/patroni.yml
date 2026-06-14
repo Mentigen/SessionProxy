@@ -17,7 +17,7 @@ bootstrap:
     postgresql:
       use_pg_rewind: true
       parameters:
-        wal_level: replica
+        wal_level: logical
         hot_standby: "on"
         wal_log_hints: "on"
         max_wal_senders: 5
@@ -29,6 +29,8 @@ bootstrap:
     - local   all         all                    trust
     - host    all         all     0.0.0.0/0      md5
     - host    replication replicator 0.0.0.0/0  md5
+    - host    replication debezium   0.0.0.0/0  md5
+    - host    all         debezium   0.0.0.0/0  md5
   post_init: /ha/post_init.sh
   users:
     ${POSTGRES_USER}:

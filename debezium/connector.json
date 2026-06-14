@@ -1,0 +1,15 @@
+{
+  "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+  "plugin.name": "pgoutput",
+  "database.hostname": "haproxy",
+  "database.port": "5432",
+  "database.user": "debezium",
+  "database.password": "debezium_secret",
+  "database.dbname": "sessionproxy",
+  "topic.prefix": "sessionproxy",
+  "table.include.list": "public.proxy_access_logs",
+  "slot.name": "debezium_slot",
+  "publication.name": "pub_proxy_logs",
+  "snapshot.mode": "initial",
+  "heartbeat.interval.ms": "5000"
+}

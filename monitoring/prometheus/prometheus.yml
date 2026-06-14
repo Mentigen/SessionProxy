@@ -20,3 +20,15 @@ scrape_configs:
   - job_name: backup
     static_configs:
       - targets: ["backup:9091"]
+
+  - job_name: patroni1
+    static_configs:
+      - targets: ["patroni1:8008"]
+
+  - job_name: patroni2
+    static_configs:
+      - targets: ["patroni2:8008"]
+
+  - job_name: etcd
+    static_configs:
+      - targets: ["etcd:2379"]

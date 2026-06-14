@@ -212,8 +212,10 @@ services:
       dockerfile: migrate/Dockerfile
     env_file: .env
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@haproxy:5432/${POSTGRES_DB}?sslmode=disable
-      TEST_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@haproxy:5432/${TEST_POSTGRES_DB}?sslmode=disable
+      DATABASE_URL: postgres://postgres:${PATRONI_SUPERUSER_PASSWORD}@haproxy:5432/${POSTGRES_DB}?sslmode=disable
+      TEST_DATABASE_URL: postgres://postgres:${PATRONI_SUPERUSER_PASSWORD}@haproxy:5432/${TEST_POSTGRES_DB}?sslmode=disable
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PATRONI_SUPERUSER_PASSWORD}
       MIGRATION_VERSION: ${MIGRATION_VERSION:-}
       POSTGRES_EXPORTER_USER: ${POSTGRES_EXPORTER_USER:-exporter}
       POSTGRES_EXPORTER_PASSWORD: ${POSTGRES_EXPORTER_PASSWORD:-exporter_secret}
@@ -224,3 +226,138 @@ services:
     restart: on-failure
     profiles:
       - ha
+
+  seeder-ha:
+    build:
+      context: .
+      dockerfile: seeder/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@haproxy:5432/${POSTGRES_DB}?sslmode=disable
+    depends_on:
+      migrate-ha:
+        condition: service_completed_successfully
+    profiles:
+      - bi
+
+  kafka:
+    image: apache/kafka:3.7.0
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 30s
+    profiles:
+      - bi
+
+  kafka-connect:
+    image: debezium/connect:2.7.3.Final
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: "1"
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: "1"
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    ports:
+      - "8083:8083"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8083/connectors > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    profiles:
+      - bi
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    volumes:
+      - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/custom.xml:ro
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "8123:8123"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8123/ping | grep -q Ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    profiles:
+      - bi
+
+  metabase-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: metabase
+      POSTGRES_USER: metabase
+      POSTGRES_PASSWORD: ${METABASE_DB_PASSWORD:-metabase_db_secret}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metabase -d metabase"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    profiles:
+      - bi
+
+  metabase-plugin-init:
+    image: curlimages/curl:8.7.1
+    entrypoint:
+      - /bin/sh
+      - -c
+      - "curl -fsSL --retry 3 -o /plugins/clickhouse.metabase-driver.jar https://github.com/ClickHouse/metabase-clickhouse-driver/releases/download/1.50.7/clickhouse.metabase-driver.jar && echo 'ClickHouse driver downloaded'"
+    volumes:
+      - metabase-plugins:/plugins
+    profiles:
+      - bi
+
+  metabase:
+    image: metabase/metabase:v0.50.14
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: metabase-db
+      MB_DB_PORT: 5432
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: metabase
+      MB_DB_PASS: ${METABASE_DB_PASSWORD:-metabase_db_secret}
+      MB_PLUGINS_DIR: /plugins
+    volumes:
+      - metabase-plugins:/plugins
+    ports:
+      - "${METABASE_PORT:-3030}:3000"
+    depends_on:
+      metabase-db:
+        condition: service_healthy
+      metabase-plugin-init:
+        condition: service_completed_successfully
+      clickhouse:
+        condition: service_healthy
+    profiles:
+      - bi
+
+volumes:
+  metabase-plugins:
