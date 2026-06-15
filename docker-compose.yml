@@ -297,6 +297,7 @@ services:
     image: clickhouse/clickhouse-server:24.3-alpine
     volumes:
       - ./clickhouse/config.xml:/etc/clickhouse-server/config.d/custom.xml:ro
+      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/allow-remote.xml:ro
       - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
     ports:
       - "8123:8123"
