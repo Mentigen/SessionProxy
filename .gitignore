@@ -3,3 +3,9 @@
 *~
 .env
 data/
+.idea/
+.vscode/
+.code-review-graph/
+backup_*.sql.gz
+app/bin/
+app/internal/transport/grpc/pb/sessionproxy/

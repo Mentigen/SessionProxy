@@ -1,0 +1,18 @@
+package templates
+
+templ ImportPage(message string) {
+	@Layout("Import session", true) {
+		<h2>Import a session</h2>
+		<p class="muted">Cookie values are encrypted (AES-256-GCM) before they are stored - see internal/crypto. This form only ever POSTs plaintext over your own connection to this server; it is never written to disk unencrypted.</p>
+		if message != "" {
+			<div class="card">{ message }</div>
+		}
+		<form method="post" action="/dashboard/import">
+			<label>Target site domain<input type="text" name="base_domain" placeholder="github.com" required/></label>
+			<label>Target site base URL<input type="text" name="base_url" placeholder="https://github.com" required/></label>
+			<label>Cookie name<input type="text" name="cookie_name" placeholder="session_id" required/></label>
+			<label>Cookie value<input type="text" name="cookie_value" placeholder="paste the cookie value" required/></label>
+			<button type="submit">Import</button>
+		</form>
+	}
+}

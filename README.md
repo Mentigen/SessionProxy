@@ -134,3 +134,91 @@ PGPASSWORD=change_me psql -h localhost -p 5433 -U sessionproxy -d sessionproxy \
 # возвращаем patroni1 - он поднимается как реплика и догоняет patroni2
 docker compose --profile ha start patroni1
 ```
+
+---
+
+## 6. CDC-пайплайн (Debezium + Kafka + ClickHouse)
+
+### Выбор таблицы
+
+Источник CDC - `proxy_access_logs`. Это единственная таблица, которая растёт пропорционально трафику через прокси, а не числу созданных объектов. Пока сессии, ссылки и пользователи практически не меняются, логи пишутся на каждый HTTP-запрос. `seed_v5.sql` заполняет её через `SELECT ... FROM guest_sessions`, так что данные для тестирования есть сразу.
+
+Для метрик используются:
+
+| Поле | Роль |
+|------|------|
+| `requested_at` | группировка по времени |
+| `http_method`, `response_status` | категории (распределение методов, доля ошибок) |
+| `response_time_ms` | latency |
+| `bytes_transferred` | трафик |
+
+`target_url`, `guest_session_id`, `shared_link_id` в ClickHouse не передаются - они нужны для операционных запросов в Postgres, для агрегатов не нужны.
+
+### Пайплайн
+
+```
+PostgreSQL (wal_level=logical, publication pub_proxy_logs)
+  -> Debezium 2.7.3 (replication slot debezium_slot, pgoutput)
+  -> Kafka 3.7.0 KRaft (топик sessionproxy.public.proxy_access_logs)
+  -> ClickHouse Kafka Engine + Materialized View
+  -> bi.proxy_access_logs (MergeTree)
+  -> Metabase
+```
+
+INSERT в Postgres появляется в ClickHouse через 1-3 секунды.
+
+### Запуск
+
+```bash
+docker compose --profile ha --profile bi up -d
+sh debezium/register.sh
+```
+
+---
+
+## 7. Application layer (Go)
+
+Каталог `app/` - реализация бизнес-логики, которую README раздела 4 явно называет незакрытой на уровне БД (сравнение `usage_counters` с `access_policies`, перевод `shared_links.status` в `terminated`). Схема и миграции не менялись, кроме одной новой (`00009_grant_app_role.sql` - см. ниже).
+
+### Data plane и control plane
+
+- **Data plane** (`app/internal/proxy`) - реверс-прокси на `net/http/httputil.ReverseProxy`. Гость идёт на `/r/{token}/...`, прокси резолвит `shared_link` по токену, расшифровывает куки/токены владельца (AES-256-GCM, `app/internal/crypto`) непосредственно перед запросом к целевому сайту, проксирует и вырезает `Set-Cookie` и другие идентифицирующие заголовки из ответа до того, как они дойдут до гостя. Это FR3/FR4 из раздела 2.
+- **Control plane** (`app/internal/transport/http`, REST на `chi`) - импорт сессии, создание/терминейт ссылок, политики, blacklist, просмотр логов/статистики. Контракт описан в `app/api/openapi.yaml`.
+- **gRPC** (`app/internal/transport/grpc`) - `ImportService` (тот же путь шифрования, что и REST, но auth через `api_keys` вместо JWT - под CLI/расширения) и `AdminService.StreamLinkActivity` (server-streaming живых событий: нарушения blacklist, auto-terminate).
+- **Веб-дашборд** (`app/internal/transport/webui`, `templ` + `htmx` + SSE) - на `/dashboard`: логин, список ссылок с terminate-в-один-клик, форма импорта, живой security-фид.
+
+### Лимиты и blacklist
+
+`usage_counters` - лимиты проверяются в Redis (`app/internal/limiter`) на каждый запрос гостя: там быстрый путь принятия решения, а Postgres - источник истины для отчётности и восстановления счётчиков после перезапуска Redis (warm load при первом обращении к ссылке). Несколько `access_policies`, привязанных к одной ссылке через `link_policies`, схлопываются в один эффективный лимит по правилу "самый строгий выигрывает" (минимум по каждому полю, `NULL` не участвует).
+
+Blacklist (`blacklisted_endpoints` + `endpoint_blocked_methods` + `site_endpoint_rules`/`link_endpoint_rules`) проверяется до похода на целевой сайт, по пути **на целевом сайте** (`/settings`), а не по гостевому URL (`/r/{token}/settings`). Пустой список методов у правила означает "блокировать все методы", непустой - блокировать только перечисленные.
+
+**Границы FR4**: вырезание `Set-Cookie` из заголовков ответа - надёжная гарантия. Утечка токена внутри тела ответа (HTML/JSON от целевого сайта) не перехватывается - это осознанно не решается на уровне прокси и не заявляется как гарантия.
+
+### Миграция 00009 и права роли приложения
+
+В HA-профиле `migrate-ha` применяет миграции от имени суперпользователя `postgres` (см. `DATABASE_URL` в `docker-compose.yml`), поэтому таблицы 00001-00007 создаются с владельцем `postgres`. Роль `sessionproxy`, которой подключается приложение, владением базы (`ha/post_init.sh`) прав на уже существующие объекты внутри неё не получает - нужен явный `GRANT`. `migrations/00009_grant_app_role.sql` выдаёт `sessionproxy` `SELECT/INSERT/UPDATE/DELETE` на все таблицы и передаёт владение `mv_link_stats` (только владелец может делать `REFRESH ... CONCURRENTLY`). Без этой миграции первый же запрос приложения на свежем кластере упал бы с `permission denied`.
+
+### Запуск
+
+```bash
+docker compose --profile ha --profile app up -d --build
+# приложение слушает :8080 (REST+webui), :9090 (gRPC), :6060 (/metrics, /debug/pprof)
+
+curl http://localhost:8080/healthz
+curl -X POST http://localhost:8080/api/v1/auth/register -H 'Content-Type: application/json' \
+  -d '{"email":"owner@example.com","password":"correct-horse-battery"}'
+```
+
+Стенд для ручной проверки инъекции кук - сервис `echo-target` (профиль `app`), эхо-сервер, показывающий заголовки, которые он получил.
+
+### Тесты
+
+```bash
+cd app
+make test-unit          # crypto, blacklist matching, policy resolver, auth, async logger - без Docker
+make test-integration    # testcontainers-go: реальный Postgres+Redis, настоящие миграции из ../migrations
+make lint
+```
+
+Ключевой сценарий интеграционных тестов (`app/test/integration/proxy_e2e_test.go` и соседние файлы): владелец импортирует сессию → создаёт ссылку → гость проходит по ссылке → цель получает расшифрованную куку владельца → гость не получает `Set-Cookie` → превышение лимита или blacklist переводит ссылку в `terminated` с верной причиной → строка долетает до `proxy_access_logs` (и далее по уже существующему CDC-пайплайну в ClickHouse/Metabase).

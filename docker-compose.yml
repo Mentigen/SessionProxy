@@ -360,5 +360,56 @@ services:
     profiles:
       - bi
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    profiles:
+      - app
+
+  # Stub target site used to prove the proxy actually injects the owner's
+  # credentials and strips them from the response - see app/test and the
+  # manual curl walkthrough in README.md section 7.
+  echo-target:
+    image: mendhak/http-https-echo:31
+    environment:
+      HTTP_PORT: 8080
+    ports:
+      - "${ECHO_TARGET_PORT:-8888}:8080"
+    profiles:
+      - app
+
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@haproxy:5432/${POSTGRES_DB}?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      HTTP_PORT: ${HTTP_PORT:-8080}
+      GRPC_PORT: ${GRPC_PORT:-9090}
+      DEBUG_PORT: ${DEBUG_PORT:-6060}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+      - "${GRPC_PORT:-9090}:9090"
+      - "${DEBUG_PORT:-6060}:6060"
+    depends_on:
+      haproxy:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    profiles:
+      - app
+
 volumes:
   metabase-plugins:

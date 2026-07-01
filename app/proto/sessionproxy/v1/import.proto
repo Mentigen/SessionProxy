@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package sessionproxy.v1;
+
+option go_package = "sessionproxy/internal/transport/grpc/pb;pb";
+
+// ImportService is the gRPC counterpart to POST /api/v1/sessions/import,
+// meant for the kind of client the api_keys table exists for per
+// README.md group 1 ("ключи доступа для браузерных расширений/CLI"): a
+// CLI tool or browser extension that already has a typed client
+// generated from this .proto, rather than a REST client hand-rolled
+// against api/openapi.yaml. It is not a 1:1 mirror of the REST surface -
+// only the one operation that this class of client actually needs.
+//
+// Authentication is an API key (api_keys.key_hash), sent as gRPC metadata
+// "authorization: Bearer spk_...", not a JWT - a CLI/extension is
+// expected to hold a long-lived key, not go through interactive login.
+service ImportService {
+  rpc ImportSession(ImportSessionRequest) returns (ImportSessionResponse);
+}
+
+message CookieInput {
+  string name = 1;
+  string value = 2; // plaintext; encrypted server-side before storage
+  string domain = 3;
+  string path = 4;
+  bool secure = 5;
+  bool http_only = 6;
+  string same_site = 7;
+}
+
+message TokenInput {
+  string token_type = 1;
+  string header_name = 2;
+  string value = 3; // plaintext; encrypted server-side before storage
+}
+
+message ImportSessionRequest {
+  string base_domain = 1;
+  string site_name = 2;
+  string base_url = 3;
+  repeated CookieInput cookies = 4;
+  repeated TokenInput tokens = 5;
+}
+
+message ImportSessionResponse {
+  string original_session_id = 1;
+  string target_site_id = 2;
+}

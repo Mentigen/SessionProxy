@@ -1,0 +1,371 @@
+openapi: 3.0.3
+info:
+  title: SessionProxy Control Plane API
+  description: >
+    Owner-facing API for SessionProxy. This documents the contract
+    implemented by hand in internal/transport/http (chi router); it is kept
+    in sync manually rather than driving code generation, so treat this file
+    as the source of truth for what the API promises, not as an artifact
+    that regenerates the server.
+  version: "1.0.0"
+servers:
+  - url: /api/v1
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      security: []
+      summary: Register a new owner account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                display_name: { type: string }
+      responses:
+        "201": { description: Created }
+        "409": { description: Email already registered }
+
+  /auth/login:
+    post:
+      security: []
+      summary: Exchange email/password for a JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  user_id: { type: string, format: uuid }
+        "401": { description: Invalid credentials }
+
+  /me:
+    get:
+      summary: Current authenticated owner
+      responses:
+        "200": { description: OK }
+
+  /target-sites:
+    get:
+      security: []
+      summary: List the shared catalog of target sites
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Register (or reuse) a target site by domain
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [base_domain, name, base_url]
+              properties:
+                base_domain: { type: string }
+                name: { type: string }
+                base_url: { type: string, format: uri }
+      responses:
+        "201": { description: Created }
+
+  /revocation-reasons:
+    get:
+      security: []
+      summary: The 5 fixed reasons a shared_link can be terminated for
+      responses:
+        "200": { description: OK }
+
+  /devices:
+    get:
+      summary: List the caller's devices
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Register a device
+      responses:
+        "201": { description: Created }
+
+  /devices/{deviceID}:
+    delete:
+      parameters:
+        - $ref: "#/components/parameters/deviceID"
+      responses:
+        "204": { description: Deleted }
+
+  /api-keys:
+    get:
+      summary: List the caller's API keys (hashes only, never raw values)
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Mint a new API key
+      description: >
+        The raw key is returned exactly once in the response body and is
+        never recoverable again - only its SHA-256 hash is stored, mirroring
+        how user passwords and session credentials are handled.
+      responses:
+        "201": { description: Created }
+
+  /api-keys/{keyID}/revoke:
+    post:
+      parameters:
+        - $ref: "#/components/parameters/keyID"
+      responses:
+        "204": { description: Revoked }
+
+  /sessions:
+    get:
+      summary: List the caller's imported original_sessions
+      responses:
+        "200": { description: OK }
+
+  /sessions/import:
+    post:
+      summary: Import an owner session for a target site (FR1)
+      description: >
+        Cookie/token plaintext in the request body is encrypted with
+        AES-256-GCM before it is ever written to session_cookies /
+        session_tokens - see internal/crypto and
+        internal/service/session_import.go.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportSessionRequest"
+      responses:
+        "201": { description: Created }
+
+  /sessions/{sessionID}:
+    get:
+      parameters:
+        - $ref: "#/components/parameters/sessionID"
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found (also returned if owned by someone else) }
+
+  /policies:
+    get:
+      summary: List the caller's access_policies
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Create an access_policy (a reusable limit template)
+      responses:
+        "201": { description: Created }
+
+  /policies/{policyID}:
+    delete:
+      parameters:
+        - $ref: "#/components/parameters/policyID"
+      responses:
+        "204": { description: Deleted }
+
+  /blacklist:
+    get:
+      summary: List the caller's blacklisted_endpoints
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Create a reusable blocked-path rule (FR5)
+      responses:
+        "201": { description: Created }
+
+  /blacklist/{endpointID}:
+    delete:
+      parameters:
+        - $ref: "#/components/parameters/endpointID"
+      responses:
+        "204": { description: Deleted }
+
+  /blacklist/{endpointID}/methods:
+    put:
+      summary: Replace the HTTP methods blocked for this endpoint pattern
+      parameters:
+        - $ref: "#/components/parameters/endpointID"
+      responses:
+        "204": { description: Updated }
+
+  /blacklist/{endpointID}/attach-site/{siteID}:
+    post:
+      summary: Apply a blacklist rule to every link under a target site
+      parameters:
+        - $ref: "#/components/parameters/endpointID"
+        - $ref: "#/components/parameters/siteID"
+      responses:
+        "204": { description: Attached }
+
+  /guests:
+    get:
+      summary: List guests the proxy has seen (across all links)
+      responses:
+        "200": { description: OK }
+
+  /links:
+    get:
+      summary: List the caller's shared_links
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, terminated] }
+      responses:
+        "200": { description: OK }
+    post:
+      summary: Create a shared_link for an owned original_session (FR2)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLinkRequest"
+      responses:
+        "201": { description: Created }
+        "409": { description: original_session is not active }
+
+  /links/{linkID}:
+    get:
+      parameters: [{ $ref: "#/components/parameters/linkID" }]
+      responses:
+        "200": { description: OK }
+        "404": { description: Not found (also returned if owned by someone else) }
+
+  /links/{linkID}/terminate:
+    post:
+      summary: Manually terminate a link (FR6/FR8)
+      parameters: [{ $ref: "#/components/parameters/linkID" }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                notes: { type: string }
+      responses:
+        "204": { description: Terminated }
+        "409": { description: Already terminated }
+
+  /links/{linkID}/stats:
+    get:
+      summary: Aggregate stats from mv_link_stats
+      parameters: [{ $ref: "#/components/parameters/linkID" }]
+      responses:
+        "200": { description: OK }
+
+  /links/{linkID}/logs:
+    get:
+      summary: Recent proxy_access_logs for this link (FR7)
+      parameters: [{ $ref: "#/components/parameters/linkID" }]
+      responses:
+        "200": { description: OK }
+
+  /links/{linkID}/guest-sessions:
+    get:
+      parameters: [{ $ref: "#/components/parameters/linkID" }]
+      responses:
+        "200": { description: OK }
+
+  /links/{linkID}/security-events:
+    get:
+      summary: security_events for this link (FR7)
+      parameters: [{ $ref: "#/components/parameters/linkID" }]
+      responses:
+        "200": { description: OK }
+
+  /links/{linkID}/termination:
+    get:
+      parameters: [{ $ref: "#/components/parameters/linkID" }]
+      responses:
+        "200": { description: OK }
+        "404": { description: Link has not been terminated }
+
+  /links/{linkID}/attach-endpoint/{endpointID}:
+    post:
+      summary: Apply an existing blacklist rule to this one link
+      parameters:
+        - $ref: "#/components/parameters/linkID"
+        - $ref: "#/components/parameters/endpointID"
+      responses:
+        "204": { description: Attached }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        Either an owner JWT from /auth/login, or a long-lived API key
+        (prefixed spk_) from POST /api-keys.
+
+  parameters:
+    linkID: { name: linkID, in: path, required: true, schema: { type: string, format: uuid } }
+    sessionID: { name: sessionID, in: path, required: true, schema: { type: string, format: uuid } }
+    deviceID: { name: deviceID, in: path, required: true, schema: { type: string, format: uuid } }
+    keyID: { name: keyID, in: path, required: true, schema: { type: string, format: uuid } }
+    policyID: { name: policyID, in: path, required: true, schema: { type: string, format: uuid } }
+    endpointID: { name: endpointID, in: path, required: true, schema: { type: string, format: uuid } }
+    siteID: { name: siteID, in: path, required: true, schema: { type: string, format: uuid } }
+
+  schemas:
+    ImportSessionRequest:
+      type: object
+      required: [base_domain, base_url, cookies]
+      properties:
+        base_domain: { type: string, example: github.com }
+        site_name: { type: string }
+        base_url: { type: string, format: uri, example: "https://github.com" }
+        cookies:
+          type: array
+          items:
+            type: object
+            required: [name, value]
+            properties:
+              name: { type: string }
+              value: { type: string, description: "plaintext; encrypted server-side before storage" }
+              domain: { type: string }
+              path: { type: string }
+              secure: { type: boolean }
+              http_only: { type: boolean }
+              same_site: { type: string, enum: [Strict, Lax, None] }
+        tokens:
+          type: array
+          items:
+            type: object
+            required: [value]
+            properties:
+              token_type: { type: string, example: bearer }
+              header_name: { type: string, example: Authorization }
+              value: { type: string, description: "plaintext; encrypted server-side before storage" }
+
+    CreateLinkRequest:
+      type: object
+      required: [original_session_id]
+      properties:
+        original_session_id: { type: string, format: uuid }
+        label: { type: string }
+        ttl_seconds: { type: integer, format: int64 }
+        policy_ids:
+          type: array
+          items: { type: string, format: uuid }
+        endpoint_ids:
+          type: array
+          items: { type: string, format: uuid }

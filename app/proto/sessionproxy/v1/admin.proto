@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package sessionproxy.v1;
+
+option go_package = "sessionproxy/internal/transport/grpc/pb;pb";
+
+import "google/protobuf/timestamp.proto";
+
+// AdminService streams link activity (auto-terminations and blacklist
+// violations) in real time. It exists alongside the REST/SSE dashboard
+// feed (internal/transport/webui) as a typed, protocol-level alternative
+// for external consumers - a CLI monitor, or a future companion app -
+// that REST polling does not serve efficiently. It is read-only: nothing
+// here is a substitute for the REST control plane, which remains the
+// only way to create/modify resources.
+service AdminService {
+  // StreamLinkActivity streams events as they happen. An empty link_id in
+  // the request means "stream every link the caller can see" - callers
+  // authenticate the same way as the REST API (owner JWT or API key), and
+  // the server only ever streams events for shared_links owned by the
+  // authenticated user.
+  rpc StreamLinkActivity(StreamLinkActivityRequest) returns (stream LinkActivityEvent);
+}
+
+message StreamLinkActivityRequest {
+  string link_id = 1; // optional; empty = all of the caller's links
+}
+
+enum LinkActivityEventType {
+  LINK_ACTIVITY_EVENT_TYPE_UNSPECIFIED = 0;
+  LINK_ACTIVITY_EVENT_TYPE_BLACKLIST_VIOLATION = 1;
+  LINK_ACTIVITY_EVENT_TYPE_LINK_TERMINATED = 2;
+}
+
+message LinkActivityEvent {
+  LinkActivityEventType type = 1;
+  string link_id = 2;
+  string message = 3;
+  google.protobuf.Timestamp occurred_at = 4;
+}

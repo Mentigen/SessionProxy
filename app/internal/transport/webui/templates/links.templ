@@ -1,0 +1,55 @@
+package templates
+
+import (
+	"sessionproxy/internal/domain"
+)
+
+templ LinksPage(links []domain.SharedLink) {
+	@Layout("Links", true) {
+		<h2>Shared links</h2>
+		<table>
+			<thead>
+				<tr><th>Label</th><th>Token</th><th>Status</th><th>Created</th><th></th></tr>
+			</thead>
+			<tbody id="links-body">
+				for _, link := range links {
+					@LinkRow(link)
+				}
+			</tbody>
+		</table>
+	}
+}
+
+// LinkRow is also returned standalone by the terminate htmx endpoint, so
+// the row updates in place without a full page reload.
+templ LinkRow(link domain.SharedLink) {
+	<tr id={ "link-" + link.ID.String() }>
+		<td>
+			if link.Label != nil {
+				{ *link.Label }
+			} else {
+				<span class="muted">(no label)</span>
+			}
+		</td>
+		<td><code>{ link.Token }</code></td>
+		<td>
+			if link.Status == domain.LinkStatusActive {
+				<span class="badge badge-active">active</span>
+			} else {
+				<span class="badge badge-terminated">terminated</span>
+			}
+		</td>
+		<td class="muted">{ link.CreatedAt.Format("2006-01-02 15:04") }</td>
+		<td>
+			if link.Status == domain.LinkStatusActive {
+				<button
+					class="danger"
+					hx-post={ "/dashboard/links/" + link.ID.String() + "/terminate" }
+					hx-target={ "#link-" + link.ID.String() }
+					hx-swap="outerHTML"
+					hx-confirm="Terminate this link?"
+				>Terminate</button>
+			}
+		</td>
+	</tr>
+}
