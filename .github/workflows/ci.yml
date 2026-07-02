@@ -37,7 +37,7 @@ jobs:
       - name: Unit tests
         run: go test $(go list ./... | grep -v /test/integration) -race -cover
       - name: Integration tests (testcontainers-go)
-        run: go test ./test/integration/... -v -timeout 300s
+        run: go test ./test/integration/... -v -count=1 -timeout 300s
 
   build:
     runs-on: ubuntu-latest

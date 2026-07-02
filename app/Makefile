@@ -16,8 +16,11 @@ test-unit:
 
 # Requires a Docker daemon: spins up real Postgres/Redis containers via
 # testcontainers-go and applies the actual migrations/ directory.
+# -count=1 disables Go's test result cache: these tests have real external
+# side effects (containers, network), so a "same inputs as last time"
+# cache hit would silently skip actually exercising Docker/Postgres/Redis.
 test-integration:
-	go test ./test/integration/... -v -timeout 300s
+	go test ./test/integration/... -v -count=1 -timeout 300s
 
 lint:
 	$(GOBIN)/golangci-lint run ./...
